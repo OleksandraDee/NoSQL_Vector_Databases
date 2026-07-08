@@ -1,0 +1,8 @@
+.env
+dataset.csv
+
+__pycache__/
+*.pyc
+.vscode/
+
+.ipynb_checkpoints/

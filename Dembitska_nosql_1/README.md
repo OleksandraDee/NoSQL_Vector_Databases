@@ -10,14 +10,14 @@ Course: NoSQL & Vector Databases
 
 # Project Overview
 
-This project demonstrates the use of **MongoDB Atlas** as a document-oriented database for storing and analyzing Spotify tracks.
+This project demonstrates the use of MongoDB Atlas as a document-oriented database for storing and analyzing Spotify tracks.
 
-The dataset contains approximately **114,000 songs** with audio characteristics such as:
+The dataset contains approximately **114,000 Spotify tracks** with audio characteristics such as:
 
 - danceability
 - energy
-- valence
 - popularity
+- valence
 - tempo
 - loudness
 - speechiness
@@ -25,14 +25,14 @@ The dataset contains approximately **114,000 songs** with audio characteristics 
 - duration
 - genre
 
-The project covers the complete workflow:
+The project includes:
 
-- loading CSV data into MongoDB
-- transforming documents into a better schema
-- querying nested documents
-- building aggregation pipelines
-- creating indexes
-- analyzing query performance using `explain()`
+- importing CSV into MongoDB;
+- transforming the schema using Aggregation Pipeline;
+- querying nested documents and arrays;
+- analytical aggregations;
+- index creation;
+- performance analysis using explain().
 
 ---
 
@@ -81,7 +81,7 @@ Install dependencies
 pip install -r requirements.txt
 ```
 
-Create a `.env` file
+Create `.env`
 
 ```env
 MONGO_URI=your_connection_string
@@ -89,9 +89,9 @@ MONGO_URI=your_connection_string
 
 ---
 
-# Loading Dataset
+# Part 1 — Loading and Schema Design
 
-Run the Python loader
+## Loading dataset
 
 ```bash
 python scripts/01_load_data.py
@@ -99,139 +99,255 @@ python scripts/01_load_data.py
 
 The script:
 
-- connects to MongoDB Atlas
-- reads `dataset.csv`
-- converts column types
-- uploads the dataset into **tracks_raw**
+- connects to MongoDB Atlas;
+- loads dataset.csv;
+- converts records into JSON documents;
+- inserts data into **tracks_raw**.
 
----
-
-### Dataset successfully loaded
+### Result
 
 ![](screenshots/05_load_data_success.png)
 
 ---
 
-# Transforming Documents
-
-Run the aggregation pipeline
+## Transforming documents
 
 ```bash
-mongosh "YOUR_MONGO_URI" --file scripts/02_transform.js
+mongosh "YOUR_CONNECTION_STRING" --file scripts/02_transform.js
 ```
 
-The pipeline creates a new collection called **tracks**.
+Transformation creates a new collection **tracks**.
 
-Main transformations:
+Changes:
 
-- artists → array
-- audio features → nested object
-- duration in seconds
-- popularity tier
-- original artist string preserved
+- artists → array;
+- audio features → nested object;
+- duration converted into seconds;
+- popularity tier added;
+- original artists string preserved.
 
----
-
-### Transformed collection
+### Result
 
 ![](screenshots/06_transformed_collection.png)
 
 ---
 
+# Part 1 — Theory
+
+## Why are audio features stored as a nested object?
+
+Fields such as danceability, energy, loudness, tempo and speechiness all describe one logical entity — the audio characteristics of a track. Grouping them into the `audio_features` object makes the schema easier to understand and avoids cluttering the top level of the document.
+
+Advantages:
+
+- better logical organization;
+- easier maintenance;
+- related fields stay together;
+- simplifies nested queries.
+
+Possible disadvantage:
+
+Very deeply nested documents may require longer field paths and slightly more complex indexes.
+
+---
+
+## Why is artists stored as an array?
+
+A track may have one or several artists.
+
+Using an array allows MongoDB to:
+
+- store any number of artists;
+- efficiently use `$unwind`;
+- search with `$in`;
+- aggregate statistics for every individual artist.
+
+If artists were stored as one string, aggregation and filtering would become much more complicated.
+
+---
+
+## Difference between `$out` and `$merge`
+
+### `$out`
+
+- completely replaces the target collection;
+- useful when rebuilding the entire dataset.
+
+### `$merge`
+
+- updates existing documents;
+- can insert only new documents;
+- useful for incremental ETL pipelines.
+
+In this project `$out` was chosen because the transformed collection is recreated from scratch.
+
+---
+
 # Part 2 — Queries
 
-## Task 1
-
-Find energetic party tracks.
+## Task 1 — Party tracks
 
 Conditions:
 
 - danceability > 0.7
 - energy > 0.7
-- duration between 180000 and 300000 ms
+- duration 180–300 seconds
 
-Result:
+Result
 
 ![](screenshots/07_part2_task1_party_tracks.png)
 
 ---
 
-## Task 2
+## Task 2 — Popular artists
 
-Find artists with multiple popular tracks.
+Aggregation:
 
-Aggregation includes:
-
-- grouping
+- `$unwind`
+- `$group`
 - average popularity
 - track count
 
-Result:
+Result
 
 ![](screenshots/08_task2_popular_artists.png)
 
 ---
 
-## Task 3
+## Task 3 — Unusual tracks
 
-Find genres with the highest average danceability.
+Tracks whose tempo is significantly higher than the average tempo of their genre.
 
-Aggregation includes:
+Statistics are calculated using:
 
-- grouping by genre
-- average danceability
-- sorting
+- `$avg`
+- `$stdDevPop`
 
-Result:
+Result
 
-![](screenshots/09_task3_danceable_genres.png)
+![](screenshots/09_part2_task3_unusual_tracks.png)
+
+---
+
+## Task 4 — Background tracks
+
+Filters:
+
+- instrumentalness > 0.5
+- speechiness < 0.1
+- loudness < -10
+- explicit = false
+
+Result
+
+![](screenshots/10_part2_task4_background_tracks.png)
+
+---
+
+# Part 2 — Theory
+
+## What does `$unwind` do?
+
+`$unwind` splits an array into multiple documents.
+
+Example:
+
+```
+artists = ["A","B","C"]
+```
+
+becomes
+
+```
+A
+B
+C
+```
+
+This allows grouping, counting and calculating statistics for each artist individually.
+
+---
+
+## Difference between `$stdDevPop` and `$stdDevSamp`
+
+`$stdDevPop`
+
+Calculates standard deviation assuming the dataset is the entire population.
+
+`$stdDevSamp`
+
+Calculates standard deviation assuming the dataset is only a sample.
+
+Since the Spotify dataset contains all available records used in this analysis, `$stdDevPop` is appropriate.
 
 ---
 
 # Part 3 — Aggregation Pipelines
 
-## Task 1
+## Task 1 — Top artists
 
-Top artists ranked by average popularity.
-
-Result:
+Result
 
 ![](screenshots/10_part3_task1_top_artists.png)
 
 ---
 
-## Task 2
+## Task 2 — Mood distribution
 
-Mood distribution based on:
-
-- energy
-- valence
-
-Songs are classified into:
+Tracks are classified into:
 
 - happy
 - calm
 - angry
 - sad
 
-Result:
+Result
 
 ![](screenshots/11_part3_task2_mood_distribution.png)
 
 ---
 
-## Task 3
+## Task 3 — Most danceable genres
 
-Most danceable genres.
+Statistics include:
 
-Additional statistics:
+- average danceability;
+- average energy;
+- average valence.
 
-- average energy
-- average valence
-
-Result:
+Result
 
 ![](screenshots/12_part3_task3_danceable_genres.png)
+
+---
+
+# Part 3 — Theory
+
+## What happens if the minimum number of tracks changes?
+
+Current threshold:
+
+```
+tracks_count >= 5
+```
+
+If reduced to **1**, many artists with only one song appear, making the ranking less reliable.
+
+If increased to **50**, only very large artists remain and many popular but less prolific artists disappear.
+
+---
+
+## What happens if the genre threshold changes?
+
+Current threshold:
+
+```
+tracks_count >= 100
+```
+
+If reduced to **50**, more genres appear but averages become less stable.
+
+If increased to **500**, only the largest genres remain and the ranking becomes more statistically reliable.
 
 ---
 
@@ -239,61 +355,72 @@ Result:
 
 ## Explain BEFORE index
 
-The query performs a **COLLSCAN**, meaning MongoDB scans the entire collection.
+The query performs a full collection scan (**COLLSCAN**).
 
-Result:
+Result
 
 ![](screenshots/13_part4_explain_before.png)
 
 ---
 
-## Creating Index
-
-Index:
+## Compound index
 
 ```javascript
-db.tracks.createIndex({ popularity: 1 })
+{
+track_genre:1,
+"audio_features.danceability":1,
+popularity:-1
+}
 ```
 
-Result:
+Result
 
-![](screenshots/14_part4_create_index.png)
+![](screenshots/14_part4_create_compound_index.png)
 
 ---
 
 ## Explain AFTER index
 
-After creating the index MongoDB uses **IXSCAN**, which significantly reduces the number of scanned documents.
+MongoDB switches to **IXSCAN**, significantly reducing scanned documents.
 
-Result:
+Result
 
 ![](screenshots/15_part4_explain_after.png)
 
 ---
 
-## Covered Query
+## Recommendation index
 
-A compound index was created:
+Compound index
 
 ```javascript
-db.tracks.createIndex({
-    track_genre: 1,
-    popularity: -1
-})
+{
+"audio_features.instrumentalness":1,
+"audio_features.speechiness":1,
+explicit:1
+}
 ```
 
-MongoDB executes the query using **PROJECTION_COVERED**, meaning all required fields are retrieved directly from the index without reading the collection documents.
+Result
 
-Result:
+![](screenshots/16_part4_recommendation_index.png)
 
-![](screenshots/16_part4_covered_query.png)
+---
+
+## Covered Query
+
+MongoDB executes the query using **PROJECTION_COVERED**.
+
+Result
+
+![](screenshots/17_part4_covered_query.png)
 
 ---
 
 # Explain Comparison
 
-| Before Index | After Index |
-|--------------|------------|
+| Before | After |
+|---------|-------|
 | COLLSCAN | IXSCAN |
 | Full collection scan | Index scan |
 | Slower | Faster |
@@ -302,25 +429,29 @@ Result:
 
 # What is a Covered Query?
 
-A Covered Query is a query in which:
+A Covered Query is a query where:
 
-- all filter fields are included in an index;
-- all returned fields are also included in the same index;
-- MongoDB answers the query directly from the index without accessing the collection documents.
+- every filter field belongs to the index;
+- every returned field belongs to the same index;
+- MongoDB answers directly from the index without reading collection documents.
 
-This significantly improves query performance.
+Advantages:
+
+- fewer disk reads;
+- lower latency;
+- better performance.
 
 ---
 
 # Conclusion
 
-During this project:
+During this assignment:
 
 - MongoDB Atlas cluster was deployed;
 - Spotify dataset (~114k tracks) was imported;
 - a document-oriented schema was designed;
-- aggregation pipelines were implemented;
-- analytical reports were created;
-- indexes were added;
+- nested documents and arrays were used;
+- analytical aggregation pipelines were implemented;
+- compound indexes were created;
 - query performance was analyzed using `explain()`;
-- the efficiency of indexing and Covered Queries was demonstrated.
+- Covered Query optimization was demonstrated.

@@ -1,0 +1,11 @@
+pinecone==5.4.2
+sentence-transformers==3.0.1
+rank-bm25==0.2.2
+kaggle==1.6.17
+pandas==2.2.2
+numpy==1.26.4
+tqdm==4.66.5
+pyarrow==17.0.0
+python-dotenv==1.0.1
+torch
+transformers

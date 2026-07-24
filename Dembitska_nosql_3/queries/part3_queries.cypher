@@ -1,0 +1,98 @@
+///////////////////////////////////////////////////////////////////////////
+// Query 1
+// Find movies by genre
+///////////////////////////////////////////////////////////////////////////
+
+MATCH (m:Movie)-[:HAS_GENRE]->(g:Genre)
+WHERE g.name = 'Comedy'
+
+RETURN
+    m.movieId,
+    m.title
+ORDER BY m.title
+LIMIT 20;
+
+///////////////////////////////////////////////////////////////////////////
+// Query 2
+// Users who gave the highest rating to a movie
+///////////////////////////////////////////////////////////////////////////
+
+MATCH (u:User)-[r:RATED]->(m:Movie)
+WHERE m.title = 'Toy Story (1995)'
+  AND r.rating = 5
+
+RETURN
+    u.userId,
+    u.gender,
+    u.age,
+    r.rating
+ORDER BY u.userId
+LIMIT 20;
+
+///////////////////////////////////////////////////////////////////////////
+// Query 3
+// Top 10 movies by average rating
+///////////////////////////////////////////////////////////////////////////
+
+MATCH (m:Movie)<-[r:RATED]-()
+
+WITH
+    m,
+    round(avg(r.rating),2) AS AverageRating,
+    count(r) AS NumberOfRatings
+
+WHERE NumberOfRatings >= 50
+
+RETURN
+    m.title AS Movie,
+    AverageRating,
+    NumberOfRatings
+
+ORDER BY AverageRating DESC, NumberOfRatings DESC
+
+LIMIT 10;
+
+///////////////////////////////////////////////////////////////////////////
+// Query 4
+// Most active users
+///////////////////////////////////////////////////////////////////////////
+
+MATCH (u:User)-[r:RATED]->()
+
+RETURN
+    u.userId AS UserID,
+    count(r) AS RatingsGiven
+
+ORDER BY RatingsGiven DESC
+
+LIMIT 10;
+
+///////////////////////////////////////////////////////////////////////////
+// Query 5
+// Find users with similar movie preferences
+///////////////////////////////////////////////////////////////////////////
+
+MATCH (u1:User {userId: 1})-[:RATED]->(m:Movie)<-[:RATED]-(u2:User)
+
+WHERE u1 <> u2
+
+RETURN
+    u2.userId AS SimilarUser,
+    count(m) AS CommonMovies
+
+ORDER BY CommonMovies DESC
+
+LIMIT 10;
+
+///////////////////////////////////////////////////////////////////////////
+// Query 6
+// Most popular genres
+///////////////////////////////////////////////////////////////////////////
+
+MATCH (g:Genre)<-[:HAS_GENRE]-(m:Movie)
+
+RETURN
+    g.name AS Genre,
+    count(m) AS NumberOfMovies
+
+ORDER BY NumberOfMovies DESC;

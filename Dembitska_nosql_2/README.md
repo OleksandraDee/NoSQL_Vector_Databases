@@ -111,7 +111,7 @@ For this assignment only the first **5000 papers** were selected, which is suffi
 
 ## Objective
 
-The first stage prepares the raw dataset for further processing.
+The first stage prepares the raw arXiv dataset for semantic search by cleaning the data, selecting the required fields, and converting it into an efficient storage format suitable for repeated processing.
 
 The original arXiv dataset is distributed as a large JSONL file containing metadata for scientific papers. Before generating embeddings, the data must be cleaned and converted into a more efficient storage format.
 
@@ -282,6 +282,16 @@ To ensure a stable and reproducible implementation, the project uses **sentence-
 Although it is a general-purpose embedding model, it produces excellent retrieval quality for scientific abstracts.
 
 ---
+## Why is SPECTER2 Recommended for Scientific Literature?
+
+SPECTER2 is specifically trained on scientific publications and citation relationships. Unlike general-purpose sentence embedding models, it learns semantic representations that capture the relationships between research papers.
+
+As a result, papers discussing similar scientific topics are placed closer together in the embedding space, even when they use different terminology.
+
+For this assignment, the original recommendation was to use SPECTER2. However, due to compatibility issues between the available SentenceTransformers and PEFT versions, the implementation uses sentence-transformers/all-mpnet-base-v2 instead.
+
+Although all-mpnet-base-v2 is a general-purpose embedding model, it produces high-quality semantic embeddings and performed well for scientific abstracts in this project.
+---
 
 ## Output
 
@@ -311,7 +321,7 @@ These embeddings serve as the foundation for all subsequent semantic search task
 
 After generating embeddings, they must be stored in a vector database to enable efficient semantic search.
 
-For this project **Pinecone** was selected because it provides fast Approximate Nearest Neighbor (ANN) search, metadata filtering and scalable vector indexing.
+For this project, **Pinecone** was selected because it provides fast Approximate Nearest Neighbor (ANN) search, metadata filtering, and scalable vector indexing.
 
 ---
 
@@ -331,80 +341,95 @@ The script performs the following operations:
 2. Loads the generated embeddings.
 3. Connects to the Pinecone vector database.
 4. Creates vector records consisting of:
-   - document ID;
-   - embedding vector;
-   - metadata.
+   - unique document identifier;
+   - 768-dimensional embedding vector;
+   - document metadata.
 5. Uploads all vectors into the Pinecone index.
 
-Each uploaded vector contains metadata:
+Each uploaded vector contains the following metadata:
 
 - title;
 - authors;
 - category;
 - publication date.
 
-Metadata makes the retrieved search results understandable for users and enables metadata filtering.
+Metadata makes the retrieved search results understandable for users and enables metadata filtering during semantic search.
 
 ---
 
 ## Why Use a Vector Database?
 
-Traditional databases search using exact values.
+Traditional databases search using exact values or keywords.
 
-Vector databases search by **similarity**.
+Vector databases search by **semantic similarity**.
 
 Instead of asking:
 
 > "Does this document contain this word?"
 
-Vector databases ask:
+a vector database asks:
 
 > "Which documents are semantically closest to this query?"
 
-This makes them ideal for semantic retrieval.
+This enables the retrieval of relevant documents even when different terminology is used, making vector databases ideal for semantic search applications.
 
 ---
 
 ## Why Pinecone?
 
-Pinecone was selected because it offers:
+Pinecone was selected because it provides:
 
-- managed cloud infrastructure;
+- fully managed cloud infrastructure;
 - high-performance vector indexing;
-- Approximate Nearest Neighbor search;
+- Approximate Nearest Neighbor (ANN) search;
 - metadata filtering;
-- scalability.
+- automatic scalability.
 
-Unlike storing vectors inside a relational database, Pinecone is specifically optimized for similarity search in high-dimensional vector spaces.
+Unlike storing vectors inside a relational database, Pinecone is specifically optimized for high-dimensional similarity search, allowing efficient retrieval even for very large collections of vectors.
+
+---
+
+## Pinecone vs. Qdrant vs. Chroma
+
+Several vector databases are available for semantic search applications.
+
+| Database | Advantages | Disadvantages |
+|-----------|------------|---------------|
+| **Pinecone** | Fully managed cloud service, automatic scaling, fast ANN search, metadata filtering | Commercial service with usage limits |
+| **Qdrant** | Open-source, advanced payload filtering, can be self-hosted | Requires deployment and maintenance |
+| **Chroma** | Lightweight, easy to install, ideal for local development and prototyping | Less suitable for large-scale production workloads |
+
+For this assignment, **Pinecone** was selected because it provides a production-ready managed cloud service with efficient vector indexing and built-in similarity search. This allows the implementation to focus on semantic retrieval instead of infrastructure management.
 
 ---
 
 ## Why Store Metadata?
 
-Embeddings themselves only contain numerical values.
+Embeddings themselves contain only numerical values.
 
-Without metadata, the system could only return vector IDs.
+Without metadata, the system would only return vector identifiers, making the search results difficult to interpret.
 
-Metadata provides meaningful information for each retrieved document:
+Metadata provides meaningful information for every retrieved document, including:
 
 - paper title;
 - authors;
-- category;
+- scientific category;
 - publication date.
 
-It also enables filtering during semantic search.
+In addition, metadata enables structured filtering during semantic search.
 
-For example:
+For example, users can:
 
-- return only Machine Learning papers;
-- return only Physics papers;
-- filter by publication year.
+- retrieve only Machine Learning papers;
+- retrieve only Physics papers;
+- filter publications by year;
+- combine metadata filters with semantic similarity.
 
 ---
 
 ## Output
 
-The upload process creates a Pinecone vector index containing all generated embeddings.
+After executing the script, a Pinecone index containing all scientific paper embeddings is created.
 
 ### Pinecone Index
 
@@ -424,13 +449,23 @@ The upload process creates a Pinecone vector index containing all generated embe
 
 ---
 
+## Intermediate Conclusion
+
+At the end of this stage, every scientific paper is represented as a dense vector stored inside Pinecone together with its associated metadata.
+
+The vector database is now ready to support efficient semantic search and metadata-based filtering without scanning the entire dataset.
+
+---
+
 # Part 4 — Semantic Search
 
 ## Objective
 
 The purpose of this stage is to retrieve scientific papers according to their semantic meaning rather than exact keyword matching.
 
-Unlike traditional search engines, semantic retrieval converts the user query into an embedding and searches for the most similar vectors inside Pinecone.
+Unlike traditional search engines, semantic retrieval converts a user's query into an embedding vector and searches for the most similar document vectors stored in Pinecone.
+
+This part also demonstrates metadata filtering and compares different similarity metrics used for vector retrieval.
 
 ---
 
@@ -442,19 +477,19 @@ python scripts/04_search.py
 
 ---
 
-## Task 1 — Semantic Search
+# Task 1 — Basic Semantic Search
 
-Query:
+### Query
 
 ```text
 deep learning for image classification
 ```
 
-The query is converted into a vector embedding.
+The query is encoded into a dense embedding using the same transformer model that was used for the scientific papers.
 
-Pinecone compares this embedding against all stored document vectors using cosine similarity.
+Pinecone compares the query embedding against all stored vectors using **Cosine Similarity** and returns the most semantically similar documents.
 
-The system returns the most semantically similar scientific papers.
+Unlike keyword search, the retrieved papers do not need to contain the exact query words. Instead, they are selected because they describe similar scientific concepts.
 
 ### Result
 
@@ -462,23 +497,25 @@ The system returns the most semantically similar scientific papers.
 
 ---
 
-## Task 2 — Semantic Search with Metadata Filter
+# Task 2 — Semantic Search with Metadata Filtering
 
-Query:
+### Query
 
 ```text
 neural networks
 ```
 
-Additional filter:
+### Filter
 
 ```text
 Category = cs.LG
 ```
 
-Only Machine Learning papers are returned.
+In addition to semantic similarity, Pinecone supports structured metadata filtering.
 
-This demonstrates that Pinecone can combine semantic similarity with structured metadata filtering.
+Only papers belonging to the **Machine Learning (cs.LG)** category are considered during retrieval.
+
+This demonstrates how semantic search can be combined with traditional database filtering to improve result relevance.
 
 ### Result
 
@@ -486,15 +523,17 @@ This demonstrates that Pinecone can combine semantic similarity with structured 
 
 ---
 
-## Task 3 — Another Semantic Query
+# Task 3 — Second Semantic Query
 
-Query:
+### Query
 
 ```text
 quantum computing algorithms
 ```
 
-The retrieved documents belong to the quantum computing domain, demonstrating that semantic retrieval works across different research fields.
+A second query was executed to verify that the semantic search system performs well across different research domains.
+
+The retrieved papers belong primarily to the field of quantum computing, showing that the embeddings successfully capture semantic meaning rather than relying on keyword matching.
 
 ### Result
 
@@ -502,98 +541,143 @@ The retrieved documents belong to the quantum computing domain, demonstrating th
 
 ---
 
+# Task 4 — Filtering by Publication Year
+
+Semantic search can also be combined with temporal constraints.
+
+The following example restricts the search to papers published after a specified year while still ranking results according to semantic similarity.
+
+This demonstrates how vector databases can integrate semantic retrieval with structured metadata queries.
+
+### Result
+
+![](screenshots/09_year_filter.png)
+
+---
+
+# Task 5 — Similarity Metric Comparison
+
+Different similarity metrics can be used when comparing vector embeddings.
+
+The project compares three commonly used metrics:
+
+- Cosine Similarity
+- Dot Product
+- Euclidean Distance (L2)
+
+Although all three retrieve related documents, the rankings differ slightly depending on how similarity is calculated.
+
+### Result
+
+![](screenshots/10_metric_comparison.png)
+
+---
+
 # Theory
 
 ## What is Semantic Search?
 
-Semantic Search retrieves documents according to their meaning.
+Semantic Search retrieves documents according to their meaning rather than exact keyword matches.
 
-Instead of matching words, it compares vector embeddings.
+Instead of comparing words directly, both the query and the documents are represented as dense vector embeddings.
 
-Documents discussing similar concepts are retrieved even when they use different vocabulary.
+Documents discussing similar concepts are located close to each other in the embedding space, allowing the system to retrieve relevant papers even when different terminology is used.
 
 ---
 
-## Full-text Search vs Semantic Search
+## Full-text Search vs. Semantic Search
 
 | Full-text Search | Semantic Search |
 |-----------------|-----------------|
 | Matches keywords | Matches meaning |
 | Requires exact words | Understands context |
 | Sensitive to synonyms | Robust to synonyms |
-| Uses token overlap | Uses embeddings |
+| Uses token overlap | Uses vector embeddings |
 
-Example:
-
-Query:
-
-> Deep learning for image classification
-
-A Full-text Search system may fail to retrieve documents using the phrase:
+For example, a keyword-based search may fail to retrieve a paper titled:
 
 > Neural architectures for visual recognition
 
+when the query is:
+
+> Deep learning for image classification
+
 because the exact keywords differ.
 
-Semantic Search retrieves these documents because they describe the same concept.
+Semantic search retrieves the paper because both texts describe the same underlying concept.
 
 ---
 
-## Cosine Similarity
+## Similarity Metrics
 
-Cosine Similarity measures the angle between two vectors.
+### Cosine Similarity
 
-Only the vector direction matters.
+Cosine Similarity measures the angle between two vectors while ignoring their magnitude.
 
-Vector magnitude is ignored.
-
-For sentence embeddings this is desirable because semantic meaning depends on direction rather than vector length.
+It is widely used for sentence embeddings because semantic meaning is primarily represented by vector direction rather than vector length.
 
 ---
 
-## Dot Product
+### Dot Product
 
-Dot Product considers both:
+Dot Product considers both the angle between vectors and their magnitudes.
 
-- direction;
-- magnitude.
+For normalized embeddings, Dot Product produces rankings that are very similar to Cosine Similarity.
 
-As a result, longer vectors may receive higher similarity scores even if their semantic meaning is not significantly closer.
+---
+
+### Euclidean Distance (L2)
+
+Euclidean Distance measures the geometric distance between vectors in the embedding space.
+
+Unlike Cosine Similarity, it is influenced by vector magnitude and therefore may produce different rankings.
+
+---
+
+## Why Do Cosine Similarity and Dot Product Produce Similar Rankings?
+
+The embedding model **sentence-transformers/all-mpnet-base-v2** produces vectors that are approximately normalized.
+
+When vectors have nearly identical magnitudes, the Dot Product becomes almost proportional to Cosine Similarity.
+
+As a result, both metrics generate nearly identical rankings, which is consistent with the experimental results obtained in this project.
+
+Euclidean Distance behaves differently because it measures geometric distance instead of angular similarity.
 
 ---
 
 ## Why Was Cosine Similarity Used?
 
-Cosine Similarity is the standard similarity metric for semantic embeddings.
+Cosine Similarity is considered the standard metric for transformer-based sentence embeddings because it focuses on semantic direction rather than vector magnitude.
 
-Advantages:
+Its advantages include:
 
-- stable ranking;
 - robust semantic comparison;
-- independent of vector magnitude.
+- stable ranking performance;
+- reduced sensitivity to vector length;
+- widespread adoption in semantic search systems.
 
-Therefore, it is the preferred metric for sentence embeddings generated by transformer models.
+For these reasons, Cosine Similarity was selected as the primary similarity metric in this project.
 
 ---
 
 ## Intermediate Conclusion
 
-At this stage the project successfully demonstrates semantic retrieval using Pinecone.
+This stage demonstrates the effectiveness of semantic search using Pinecone.
 
-Unlike keyword search, documents are retrieved according to semantic similarity, while metadata filtering further improves search precision.
+Compared with traditional keyword search, semantic retrieval identifies conceptually related scientific papers even when different terminology is used.
 
-
+The experiments also show that metadata filtering can significantly improve search precision, while the comparison of similarity metrics confirms that Cosine Similarity and Dot Product produce nearly identical rankings for normalized transformer embeddings.
 ---
-
 # Part 5 — Chunking Strategies
 
 ## Objective
 
-Large Language Models and embedding models have a limited context window, meaning they cannot effectively process very long documents at once.
+Embedding models have a limited context window and cannot efficiently process very long documents in a single pass.
 
-To overcome this limitation, documents are divided into smaller pieces called **chunks** before generating embeddings.
+To address this limitation, documents are divided into smaller segments called **chunks** before generating embeddings.
 
-The goal of this part is to compare different chunking strategies and understand how they affect semantic search quality.
+The objective of this part is to compare two chunking strategies by indexing them into separate Pinecone indexes and evaluating their semantic retrieval performance.
 
 ---
 
@@ -605,57 +689,115 @@ python scripts/05_chunking.py
 
 ---
 
-## Fixed-size Chunking
+## Chunking Strategies
 
-The first strategy divides a document into chunks of approximately equal size.
+Two chunking strategies were implemented:
+
+### Fixed-size Chunking
+
+The document is divided into equally sized text fragments.
 
 Advantages:
 
 - simple implementation;
-- predictable chunk length;
+- predictable chunk size;
 - efficient preprocessing.
 
 Disadvantages:
 
-- may split sentences in the middle;
-- logical context can be broken;
+- sentences may be split;
+- logical context can be interrupted;
 - semantic meaning may be partially lost.
-
-### Result
-
-![](screenshots/09_fixed_chunking.png)
 
 ---
 
-## Chunking Comparison
+### Paragraph-based Chunking
 
-The script compares:
+The document is divided according to paragraph boundaries.
 
-- number of generated chunks;
-- average chunk length;
-- quality of the produced chunks.
+Advantages:
 
-The experiment showed that paragraph-based chunking creates fewer but larger chunks, while fixed-size chunking generates more equally sized fragments.
+- preserves semantic context;
+- maintains logical structure;
+- produces more coherent embeddings.
+
+Disadvantages:
+
+- chunk sizes are less uniform;
+- preprocessing depends on document formatting.
+
+---
+
+## Chunk Creation
+
+The script generates both chunking strategies for the same scientific paper.
 
 ### Result
 
-![](screenshots/10_chunking_comparison.png)
+![](screenshots/09_chunk_creation.png)
+
+---
+
+## Semantic Search Using Separate Pinecone Indexes
+
+Each chunking strategy is uploaded into its own Pinecone index:
+
+- **arxiv-fixed**
+- **arxiv-paragraph**
+
+The same semantic query is executed against both indexes.
+
+### Fixed-size Chunk Search
+
+![](screenshots/10_fixed_index_search.png)
+
+---
+
+### Paragraph-based Chunk Search
+
+![](screenshots/11_paragraph_index_search.png)
+
+---
+
+## Comparison
+
+The experiment compares:
+
+- number of generated chunks;
+- average chunk size;
+- semantic retrieval quality.
+
+The results show that paragraph-based chunking generally returns more coherent search results because complete semantic units are preserved.
+
+Fixed-size chunking generates more uniformly sized fragments but may split important contextual information across chunk boundaries.
+
+### Result
+
+![](screenshots/12_chunking_comparison.png)
 
 ---
 
 ## Why is Chunking Important?
 
-Embedding models have a limited input size.
+Embedding models accept only a limited amount of text.
 
-If a document is too large:
+Without chunking:
 
-- part of the information may be truncated;
-- embeddings become less informative;
-- search quality decreases.
+- long documents may be truncated;
+- important information can be lost;
+- embedding quality decreases.
 
-Chunking allows large documents to be indexed while preserving their semantic meaning.
+Chunking enables large scientific documents to be indexed while preserving their semantic content.
 
-For scientific papers, paragraph-based chunking usually produces more meaningful embeddings because it preserves the logical structure of the document.
+For scientific literature, paragraph-based chunking is generally preferable because paragraphs usually correspond to complete ideas or research concepts.
+
+---
+
+## Intermediate Conclusion
+
+Both chunking strategies successfully support semantic search.
+
+However, paragraph-based chunking provides more meaningful retrieval results because it preserves the natural structure of scientific documents.
 
 ---
 
@@ -663,14 +805,14 @@ For scientific papers, paragraph-based chunking usually produces more meaningful
 
 ## Objective
 
-Semantic search is very powerful, but keyword search is still useful when users search for exact terminology.
+Semantic search retrieves documents according to meaning, while keyword search remains effective for exact terminology.
 
-Hybrid Search combines both approaches in order to improve retrieval quality.
+Hybrid Search combines both approaches to improve retrieval quality.
 
 The implementation consists of three stages:
 
 1. BM25 keyword search;
-2. Vector search using Pinecone;
+2. Pinecone vector search;
 3. Reciprocal Rank Fusion (RRF).
 
 ---
@@ -683,11 +825,31 @@ python scripts/06_hybrid_search.py
 
 ---
 
+## Experimental Queries
+
+Three different queries were evaluated:
+
+```text
+deep learning for image classification
+```
+
+```text
+quantum computing algorithms
+```
+
+```text
+graph neural networks
+```
+
+Testing multiple queries demonstrates that the hybrid approach performs consistently across different scientific domains.
+
+---
+
 ## BM25 Search
 
-BM25 ranks documents according to keyword frequency and document statistics.
+BM25 ranks documents using lexical similarity based on keyword frequency and inverse document frequency.
 
-It performs well when the user query contains exact scientific terminology.
+It performs particularly well when the query contains exact scientific terminology.
 
 ### Result
 
@@ -697,11 +859,11 @@ It performs well when the user query contains exact scientific terminology.
 
 ## Vector Search
 
-The same query is converted into an embedding.
+The query is converted into a transformer embedding.
 
-Pinecone compares this embedding with all stored vectors and returns the most semantically similar papers.
+Pinecone retrieves the documents whose embeddings are most similar to the query vector.
 
-Unlike BM25, vector search retrieves documents according to their meaning rather than exact keywords.
+Unlike BM25, Vector Search retrieves semantically related papers even when different terminology is used.
 
 ### Result
 
@@ -711,9 +873,9 @@ Unlike BM25, vector search retrieves documents according to their meaning rather
 
 ## Hybrid Search (RRF)
 
-Finally, the results produced by BM25 and Vector Search are combined using **Reciprocal Rank Fusion (RRF)**.
+The rankings produced by BM25 and Vector Search are combined using **Reciprocal Rank Fusion (RRF)**.
 
-Documents that receive high rankings in both methods appear at the top of the final ranking.
+Documents that receive high rankings from both methods are promoted to the top of the final ranking.
 
 ### Result
 
@@ -721,11 +883,21 @@ Documents that receive high rankings in both methods appear at the top of the fi
 
 ---
 
+## Comparison of Retrieval Methods
+
+The implementation compares the rankings produced by all three retrieval approaches.
+
+### Result
+
+![](screenshots/14_hybrid_comparison.png)
+
+---
+
 # Theory
 
 ## What is BM25?
 
-BM25 is one of the most widely used keyword ranking algorithms in Information Retrieval.
+BM25 is one of the most widely used ranking algorithms in Information Retrieval.
 
 It ranks documents according to:
 
@@ -735,28 +907,28 @@ It ranks documents according to:
 
 Advantages:
 
-- fast;
-- interpretable;
-- excellent keyword matching.
+- efficient keyword matching;
+- interpretable ranking;
+- computationally efficient.
 
 Limitations:
 
-- does not understand semantic meaning;
-- sensitive to wording.
+- cannot understand semantic meaning;
+- sensitive to wording and synonyms.
 
 ---
 
 ## What is Vector Search?
 
-Vector Search compares embeddings rather than keywords.
+Vector Search compares dense embeddings rather than keywords.
 
-Instead of matching words, it measures semantic similarity between vectors.
+Instead of matching words directly, it retrieves documents according to semantic similarity.
 
 Advantages:
 
 - understands context;
 - handles synonyms;
-- retrieves conceptually similar documents.
+- retrieves conceptually related documents.
 
 Limitations:
 
@@ -766,26 +938,26 @@ Limitations:
 
 ## What is Hybrid Search?
 
-Hybrid Search combines keyword-based retrieval and semantic retrieval.
+Hybrid Search combines lexical retrieval with semantic retrieval.
 
-The goal is to benefit from the strengths of both approaches.
+In this project, Hybrid Search merges:
 
-In this project, Hybrid Search combines:
+- BM25 keyword search;
+- Pinecone vector search.
 
-- BM25;
-- Pinecone Vector Search.
+The goal is to benefit from both exact keyword matching and semantic understanding.
 
 ---
 
 ## What is Reciprocal Rank Fusion (RRF)?
 
-Reciprocal Rank Fusion combines multiple ranked lists into one final ranking.
+Reciprocal Rank Fusion (RRF) combines multiple ranked lists into a single ranking.
 
 Instead of combining similarity scores, RRF combines document positions.
 
-Documents that appear near the top of several rankings receive higher final scores.
+Documents that consistently appear near the top of multiple rankings receive higher final scores.
 
-This makes Hybrid Search more robust than using BM25 or Vector Search independently.
+This produces more robust retrieval performance than relying on either BM25 or Vector Search individually.
 
 ---
 
@@ -793,24 +965,18 @@ This makes Hybrid Search more robust than using BM25 or Vector Search independen
 
 | Method | Advantages | Limitations |
 |---------|------------|-------------|
-| BM25 | Excellent keyword matching | Cannot understand semantic meaning |
-| Vector Search | Finds semantically related documents | May ignore exact keywords |
-| Hybrid Search | Combines lexical and semantic relevance | Slightly more computationally expensive |
+| BM25 | Excellent keyword matching | Cannot capture semantic meaning |
+| Vector Search | Retrieves semantically related documents | Exact keyword matching may be weaker |
+| Hybrid Search | Combines lexical and semantic relevance | Slightly higher computational cost |
 
 ---
 
-# Conclusion
+# Final Conclusion
 
-During this project:
+This project demonstrates a complete semantic search pipeline for scientific literature.
 
-- the arXiv dataset was prepared and cleaned;
-- dense vector embeddings were generated using a Transformer model;
-- embeddings were stored in Pinecone;
-- semantic search with metadata filtering was implemented;
-- chunking strategies were compared;
-- BM25 keyword search was implemented;
-- Hybrid Search using Reciprocal Rank Fusion (RRF) was developed.
+The workflow includes dataset preparation, embedding generation, vector indexing in Pinecone, semantic retrieval, metadata filtering, chunking strategies, and Hybrid Search using Reciprocal Rank Fusion.
 
-The experiments demonstrate that semantic search retrieves documents according to their meaning rather than exact wording, while Hybrid Search provides the most balanced retrieval quality by combining lexical and semantic relevance.
+The experiments show that semantic search retrieves scientifically related papers more effectively than traditional keyword-based methods. Metadata filtering further improves retrieval precision, while paragraph-based chunking preserves document context more effectively than fixed-size chunking.
 
-Overall, this project illustrates how modern embedding models and vector databases can significantly improve information retrieval compared to traditional keyword-based search.
+Finally, Hybrid Search provides the most balanced retrieval performance by combining the strengths of lexical matching (BM25) and semantic similarity, making it the most effective approach among the evaluated retrieval methods.

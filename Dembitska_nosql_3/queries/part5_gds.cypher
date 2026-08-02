@@ -1,128 +1,261 @@
-// ------------------------------------------------------
-// 1. Verify data
-// ------------------------------------------------------
+///////////////////////////////////////////////////////////////////////////
+// PART 5
+// Graph Data Science Algorithms
+///////////////////////////////////////////////////////////////////////////
 
-MATCH (m:Movie)
-RETURN count(m) AS Movies;
+///////////////////////////////////////////////////////////////////////////
+// 5.1 PageRank
+///////////////////////////////////////////////////////////////////////////
 
-MATCH (u:User)
-RETURN count(u) AS Users;
+MATCH (m1:Movie)<-[r1:RATED]-(u:User)-[r2:RATED]->(m2:Movie)
+WHERE r1.rating >= 4
+  AND r2.rating >= 4
+  AND id(m1) < id(m2)
 
-MATCH (g:Genre)
-RETURN count(g) AS Genres;
+WITH m1, m2, count(u) AS weight
 
-MATCH ()-[r:RATED]->()
-RETURN count(r) AS Ratings;
+WHERE size([(m1)<-[:RATED]-() | 1]) > 20
+  AND size([(m2)<-[:RATED]-() | 1]) > 20
 
+WITH m1, m2, weight
+ORDER BY weight DESC
+LIMIT 50000
 
-// ------------------------------------------------------
-// 2. Create graph projection
-// ------------------------------------------------------
+MERGE (m1)-[co:CO_RATED]-(m2)
+SET co.weight = weight;
 
 CALL gds.graph.project(
+
     'movieGraph',
-    ['User', 'Movie'],
-    ['RATED']
-);
 
+    'Movie',
 
-// ------------------------------------------------------
-// 3. PageRank
-// ------------------------------------------------------
+    {
+        CO_RATED:{
+            orientation:'UNDIRECTED',
+            properties:'weight'
+        }
+    }
 
-CALL gds.pageRank.stream('movieGraph')
-YIELD nodeId, score
+)
+YIELD graphName,nodeCount,relationshipCount;
 
-WITH gds.util.asNode(nodeId) AS n, score
-WHERE n:Movie
+CALL gds.pageRank.stream(
+
+    'movieGraph',
+
+    {
+        relationshipWeightProperty:'weight'
+    }
+
+)
+
+YIELD nodeId,score
 
 RETURN
-    n.title AS Movie,
-    round(score,4) AS PageRank
+
+gds.util.asNode(nodeId).title AS Movie,
+
+round(score,4) AS PageRank
 
 ORDER BY PageRank DESC
+
 LIMIT 10;
 
+CALL gds.graph.drop('movieGraph');
 
-// ------------------------------------------------------
-// 4. Louvain Community Detection
-// ------------------------------------------------------
+MATCH ()-[co:CO_RATED]-()
 
-CALL gds.louvain.stream('movieGraph')
-YIELD communityId
+DELETE co;
+
+///////////////////////////////////////////////////////////////////////////
+// 5.2 Louvain Community Detection
+///////////////////////////////////////////////////////////////////////////
+
+MATCH (u1:User)-[r1:RATED]->(m:Movie)<-[r2:RATED]-(u2:User)
+
+WHERE r1.rating>=4
+  AND r2.rating>=4
+  AND id(u1)<id(u2)
+
+WITH u1,u2,count(m) AS weight
+
+ORDER BY weight DESC
+
+LIMIT 50000
+
+MERGE (u1)-[sim:SIMILAR]-(u2)
+
+SET sim.weight=weight;
+
+CALL gds.graph.project(
+
+'userSimilarity',
+
+'User',
+
+{
+
+SIMILAR:{
+
+orientation:'UNDIRECTED',
+
+properties:'weight'
+
+}
+
+}
+
+)
+
+YIELD graphName,nodeCount,relationshipCount;
+
+CALL gds.louvain.stream(
+
+'userSimilarity',
+
+{
+
+relationshipWeightProperty:'weight'
+
+}
+
+)
+
+YIELD nodeId,communityId
+
+WITH communityId,gds.util.asNode(nodeId) AS user
 
 RETURN
-    communityId,
-    count(*) AS Size
 
-ORDER BY Size DESC
+communityId,
+
+count(user) AS Members
+
+ORDER BY Members DESC
+
 LIMIT 10;
 
+///////////////////////////////////////////////////////////////////////////
+// Top genres inside every community
+///////////////////////////////////////////////////////////////////////////
 
-// ------------------------------------------------------
-// 5. Create weighted graph for Dijkstra
-// ------------------------------------------------------
+CALL gds.louvain.stream(
 
-CALL gds.graph.drop('movieGraph', false);
+'userSimilarity',
+
+{
+
+relationshipWeightProperty:'weight'
+
+}
+
+)
+
+YIELD nodeId,communityId
+
+WITH communityId,gds.util.asNode(nodeId) AS u
+
+MATCH (u)-[r:RATED]->(m:Movie)-[:HAS_GENRE]->(g:Genre)
+
+WHERE r.rating>=4
+
+WITH communityId,g.name AS Genre,count(*) AS Votes
+
+ORDER BY communityId,Votes DESC
+
+RETURN
+
+communityId,
+
+collect({
+
+Genre:Genre,
+
+Votes:Votes
+
+})[0..3] AS TopGenres
+
+LIMIT 10;
+
+CALL gds.graph.drop('userSimilarity');
+
+MATCH ()-[sim:SIMILAR]-()
+
+DELETE sim;
+
+///////////////////////////////////////////////////////////////////////////
+// 5.3 Dijkstra Shortest Path
+///////////////////////////////////////////////////////////////////////////
+
+MATCH (u1:User)-[r1:RATED]->(m:Movie)<-[r2:RATED]-(u2:User)
+
+WHERE r1.rating>=4
+  AND r2.rating>=4
+  AND id(u1)<id(u2)
+
+WITH u1,u2,count(m) AS weight
+
+ORDER BY weight DESC
+
+LIMIT 50000
+
+MERGE (u1)-[sim:SIMILAR]-(u2)
+
+SET sim.weight=1.0/weight;
 
 CALL gds.graph.project(
-    'movieGraphWeighted',
-    ['User', 'Movie'],
-    {
-        RATED: {
-            properties: 'rating'
-        }
-    }
-);
 
+'userGraph',
 
-// ------------------------------------------------------
-// 6. Demo graph for Dijkstra
-// (used because full MovieLens graph requires
-// significantly more memory for shortest path search)
-// ------------------------------------------------------
+'User',
 
-CREATE (u1:DemoUser {id:1});
-CREATE (u2:DemoUser {id:2});
-CREATE (u3:DemoUser {id:3});
+{
 
-CREATE (u1)-[:LINK {weight:1}]->(u2);
-CREATE (u2)-[:LINK {weight:2}]->(u3);
-CREATE (u1)-[:LINK {weight:5}]->(u3);
+SIMILAR:{
 
+orientation:'UNDIRECTED',
 
-// ------------------------------------------------------
-// 7. Create demo projection
-// ------------------------------------------------------
+properties:'weight'
 
-CALL gds.graph.project(
-    'demoGraph',
-    'DemoUser',
-    {
-        LINK: {
-            properties: 'weight'
-        }
-    }
-);
+}
 
+}
 
-// ------------------------------------------------------
-// 8. Dijkstra Shortest Path
-// ------------------------------------------------------
+)
 
-MATCH (source:DemoUser {id:1})
-MATCH (target:DemoUser {id:3})
+YIELD graphName,nodeCount,relationshipCount;
+
+MATCH (source:User {userId:1})
+
+MATCH (target:User {userId:3})
 
 CALL gds.shortestPath.dijkstra.stream(
-    'demoGraph',
-    {
-        sourceNode: id(source),
-        targetNode: id(target),
-        relationshipWeightProperty: 'weight'
-    }
+
+'userGraph',
+
+{
+
+sourceNode:id(source),
+
+targetNode:id(target),
+
+relationshipWeightProperty:'weight'
+
+}
+
 )
-YIELD totalCost, nodeIds
+
+YIELD totalCost,nodeIds
 
 RETURN
-    totalCost,
-    [nodeId IN nodeIds | gds.util.asNode(nodeId).id] AS Path;
+
+totalCost,
+
+[nodeId IN nodeIds | gds.util.asNode(nodeId).userId] AS Path;
+
+CALL gds.graph.drop('userGraph');
+
+MATCH ()-[sim:SIMILAR]-()
+
+DELETE sim;

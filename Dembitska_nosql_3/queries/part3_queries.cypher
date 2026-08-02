@@ -1,98 +1,120 @@
 ///////////////////////////////////////////////////////////////////////////
 // Query 1
-// Find movies by genre
+// Find Thriller movies with average rating above 4.0
 ///////////////////////////////////////////////////////////////////////////
 
-MATCH (m:Movie)-[:HAS_GENRE]->(g:Genre)
-WHERE g.name = 'Comedy'
+MATCH (m:Movie)-[:HAS_GENRE]->(:Genre {name:'Thriller'})
+MATCH (m)<-[r:RATED]-()
 
-RETURN
-    m.movieId,
-    m.title
-ORDER BY m.title
-LIMIT 20;
+WITH m, avg(r.rating) AS avgRating
 
-///////////////////////////////////////////////////////////////////////////
-// Query 2
-// Users who gave the highest rating to a movie
-///////////////////////////////////////////////////////////////////////////
-
-MATCH (u:User)-[r:RATED]->(m:Movie)
-WHERE m.title = 'Toy Story (1995)'
-  AND r.rating = 5
-
-RETURN
-    u.userId,
-    u.gender,
-    u.age,
-    r.rating
-ORDER BY u.userId
-LIMIT 20;
-
-///////////////////////////////////////////////////////////////////////////
-// Query 3
-// Top 10 movies by average rating
-///////////////////////////////////////////////////////////////////////////
-
-MATCH (m:Movie)<-[r:RATED]-()
-
-WITH
-    m,
-    round(avg(r.rating),2) AS AverageRating,
-    count(r) AS NumberOfRatings
-
-WHERE NumberOfRatings >= 50
+WHERE avgRating > 4.0
 
 RETURN
     m.title AS Movie,
-    AverageRating,
-    NumberOfRatings
+    round(avgRating,2) AS AverageRating
 
-ORDER BY AverageRating DESC, NumberOfRatings DESC
-
-LIMIT 10;
+ORDER BY AverageRating DESC, Movie;
 
 ///////////////////////////////////////////////////////////////////////////
-// Query 4
-// Most active users
+// Query 2
+// Users who rated more than 50 movies with the highest score (5)
 ///////////////////////////////////////////////////////////////////////////
 
 MATCH (u:User)-[r:RATED]->()
 
+WHERE r.rating = 5
+
+WITH u, count(r) AS FiveStarRatings
+
+WHERE FiveStarRatings > 50
+
 RETURN
     u.userId AS UserID,
-    count(r) AS RatingsGiven
+    FiveStarRatings
 
-ORDER BY RatingsGiven DESC
+ORDER BY FiveStarRatings DESC;
 
-LIMIT 10;
+///////////////////////////////////////////////////////////////////////////
+// Query 3
+// Movies highly rated (>=4) by both User 1 and User 2
+///////////////////////////////////////////////////////////////////////////
+
+MATCH (u1:User {userId:1})-[r1:RATED]->(m:Movie)<-[r2:RATED]-(u2:User {userId:2})
+
+WHERE r1.rating >= 4
+  AND r2.rating >= 4
+
+RETURN
+    m.title AS Movie,
+    r1.rating AS User1Rating,
+    r2.rating AS User2Rating
+
+ORDER BY Movie;
+
+///////////////////////////////////////////////////////////////////////////
+// Query 4
+// Genres with consistently high ratings
+///////////////////////////////////////////////////////////////////////////
+
+MATCH (m:Movie)-[:HAS_GENRE]->(g:Genre)
+MATCH (m)<-[r:RATED]-()
+
+WITH
+    g,
+    avg(r.rating) AS AverageRating,
+    count(r) AS NumberOfRatings
+
+RETURN
+    g.name AS Genre,
+    round(AverageRating,2) AS AverageRating,
+    NumberOfRatings
+
+ORDER BY AverageRating DESC, NumberOfRatings DESC;
 
 ///////////////////////////////////////////////////////////////////////////
 // Query 5
-// Find users with similar movie preferences
+// Recommendation:
+// Users with similar tastes also watched these movies
 ///////////////////////////////////////////////////////////////////////////
 
-MATCH (u1:User {userId: 1})-[:RATED]->(m:Movie)<-[:RATED]-(u2:User)
+MATCH (target:User {userId:1})-[r1:RATED]->(m:Movie)<-[r2:RATED]-(other:User)
 
-WHERE u1 <> u2
+WHERE r1.rating >= 4
+  AND r2.rating >= 4
+  AND target <> other
 
-RETURN
-    u2.userId AS SimilarUser,
-    count(m) AS CommonMovies
+WITH target, other, count(m) AS CommonMovies
 
 ORDER BY CommonMovies DESC
+
+LIMIT 20
+
+MATCH (other)-[r:RATED]->(rec:Movie)
+
+WHERE r.rating >= 4
+  AND NOT EXISTS {
+      MATCH (target)-[:RATED]->(rec)
+  }
+
+RETURN
+    rec.title AS RecommendedMovie,
+    count(*) AS RecommendationScore
+
+ORDER BY RecommendationScore DESC
 
 LIMIT 10;
 
 ///////////////////////////////////////////////////////////////////////////
 // Query 6
-// Most popular genres
+// Shortest path between two users through common movies
 ///////////////////////////////////////////////////////////////////////////
 
-MATCH (g:Genre)<-[:HAS_GENRE]-(m:Movie)
+MATCH (u1:User {userId:1}),
+      (u2:User {userId:2})
+
+MATCH p = shortestPath((u1)-[:RATED*..6]-(u2))
 
 RETURN
-    g.name AS Genre,
-    count(m) AS NumberOfMovies
-
-ORDER BY NumberOfMovies DESC;
+    length(p) AS PathLength,
+    p;

@@ -89,13 +89,11 @@ Dembitska_nosql_3/
 
 # Part 1 — Graph Schema Design
 
-Before importing the dataset into Neo4j, it is necessary to design an appropriate graph model. A well-designed schema simplifies graph traversals, reduces query complexity, and improves performance.
-
-The MovieLens dataset naturally represents relationships between users and movies, making it a good candidate for a graph database.
+Before importing the MovieLens dataset into Neo4j, an appropriate graph schema was designed. Since the dataset mainly describes relationships between users and movies, the **Property Graph Model** is a natural choice. The selected schema minimizes traversal complexity, reduces data duplication, and provides efficient execution of recommendation queries.
 
 ## Graph Schema
 
-```
+```text
               +----------------------+
               |        User          |
               |----------------------|
@@ -126,42 +124,42 @@ The MovieLens dataset naturally represents relationships between users and movie
               +----------------------+
 ```
 
+If available, the generated Neo4j schema visualization is shown below.
+
+![Graph Schema](screenshots/graph_schema.png)
+
 ---
 
 ## Graph Nodes
 
 ### User
 
-Properties:
+**Properties**
 
-- userId
-- gender
-- age
-- occupation
+- `userId`
+- `gender`
+- `age`
+- `occupation`
 
-Each user represents one person who rated one or more movies.
-
----
+Each **User** node represents one MovieLens user.
 
 ### Movie
 
-Properties:
+**Properties**
 
-- movieId
-- title
-- year
+- `movieId`
+- `title`
+- `year`
 
-Each movie is represented only once in the graph regardless of the number of ratings it receives.
-
----
+Each **Movie** node exists only once regardless of how many ratings it receives.
 
 ### Genre
 
-Properties:
+**Properties**
 
-- name
+- `name`
 
-Each genre exists only once and is shared by all movies belonging to that genre.
+Each **Genre** node is shared among all movies belonging to that genre.
 
 ---
 
@@ -169,148 +167,169 @@ Each genre exists only once and is shared by all movies belonging to that genre.
 
 ### RATED
 
-```
-(User)-[:RATED]->(Movie)
+```text
+(User)-[:RATED {rating, timestamp}]->(Movie)
 ```
 
 Properties:
 
-- rating
-- timestamp
+- `rating`
+- `timestamp`
 
-Each relationship represents a single user's rating for a movie.
-
----
+Each relationship stores one user's rating for one movie.
 
 ### HAS_GENRE
 
-```
+```text
 (Movie)-[:HAS_GENRE]->(Genre)
 ```
 
-This relationship connects every movie with one or more genres.
+Each movie is connected to one or more genres.
 
 ---
 
-## Question 1
+# Question 1
 
-### Which entities became nodes and which became relationships? Why?
+## Which entities became nodes and which became relationships? Why?
 
-Users, Movies and Genres were modeled as nodes because they represent independent entities with their own attributes and can participate in many different relationships.
+The graph contains three node types:
 
-Ratings were modeled as relationships because they naturally describe an interaction between a user and a movie. A rating cannot exist independently without both entities, making it a better fit as an edge instead of a node.
+- **User**
+- **Movie**
+- **Genre**
+
+These entities have their own attributes and exist independently from one another.
+
+Ratings were modeled as **relationships** because they describe an interaction between exactly one user and one movie. A rating has no meaning without both endpoints, making it a natural edge in the graph.
+
+This design keeps the graph compact and allows recommendation queries to traverse directly from users to movies without introducing additional intermediate nodes.
 
 ---
 
-## Question 2
+# Question 2
 
-### Why was Rating modeled as a relationship instead of a separate node?
+## Why was Rating modeled as a relationship instead of a separate node?
 
-The relationship model
+The implemented model is:
 
-```
+```text
 (User)-[:RATED]->(Movie)
 ```
 
-is more natural because a rating connects exactly one user with exactly one movie.
-
-Advantages:
+This approach has several advantages:
 
 - fewer nodes in the graph;
-- simpler traversal;
+- simpler graph traversals;
 - faster recommendation queries;
 - lower storage requirements.
 
-An alternative design would introduce Rating as a separate node:
+An alternative design could model ratings as separate nodes:
 
-```
+```text
 (User)-[:MADE]->(Rating)-[:FOR]->(Movie)
 ```
 
-Although this approach allows storing additional metadata about ratings, it increases graph complexity, requires more joins during traversals, and generally performs worse for recommendation queries.
+This approach also has advantages:
 
-For the MovieLens dataset, representing ratings as relationships is the better choice because recommendations mainly depend on the connection between users and movies.
+- ratings become independent entities;
+- additional metadata (comments, review text, likes, moderation status, etc.) can easily be attached;
+- ratings themselves may participate in other relationships.
+
+However, it also introduces important disadvantages:
+
+- significantly more nodes;
+- longer traversal paths;
+- more complex Cypher queries;
+- lower performance for graph traversals and recommendation algorithms.
+
+Since the MovieLens dataset stores only a numeric rating and a timestamp, representing ratings as relationships is the simplest and most efficient solution.
 
 ---
 
-## Question 3
+# Question 3
 
-### Why are genres stored as separate nodes instead of a list property?
+## Why are genres stored as separate nodes instead of a list property?
 
-Genres could be stored as a string list inside the Movie node.
+Genres could be stored as a property inside each movie, for example:
 
-Example:
-
-```
+```text
 genres = ["Comedy", "Drama"]
 ```
 
-However, using separate Genre nodes has several advantages.
+However, representing genres as separate nodes provides several important advantages.
 
-First, graph traversals become much simpler because all movies belonging to the same genre share the same Genre node.
+First, all movies belonging to the same genre become directly connected through a shared **Genre** node, making graph traversals straightforward.
 
-Second, it allows efficient aggregation such as:
+Second, aggregation queries become much simpler, for example:
 
 - number of movies in each genre;
-- average ratings by genre;
-- most popular genres.
+- average rating per genre;
+- most popular genres;
+- recommendation queries limited to a specific genre.
 
-Finally, Genre nodes can easily store additional information in the future without changing the schema.
+Finally, Genre nodes can later be extended with additional attributes without modifying the Movie schema.
 
-For these reasons, modeling genres as separate nodes follows graph database best practices.
+For these reasons, modeling genres as separate nodes follows graph database best practices and results in a cleaner and more flexible graph model.
 
 ---
 
 # Part 2 — Data Loading
 
-The MovieLens dataset was imported into Neo4j after converting the original `.dat` files into UTF-8 CSV files.
+The MovieLens dataset was imported into Neo4j after converting the original `.dat` files into UTF-8 CSV format. Since the original dataset uses the `::` delimiter and Latin-1 encoding, a preprocessing step was required before importing the data.
 
-To avoid duplicate nodes during repeated imports, the `MERGE` clause was used instead of `CREATE` wherever appropriate.
+To prevent duplicate records during repeated executions of the import scripts, the `MERGE` clause was used instead of `CREATE` wherever appropriate.
 
-Before loading relationships, uniqueness constraints were created to speed up node lookups and prevent duplicates.
+Before importing relationships, uniqueness constraints were created to improve lookup performance and guarantee entity uniqueness.
+
+Because the dataset contains more than one million ratings, the relationship import was performed using `apoc.periodic.iterate()` with batch processing.
 
 The import process consisted of the following steps:
 
-1. Create constraints.
-2. Load Movie nodes.
-3. Load User nodes.
-4. Create Genre nodes.
-5. Create HAS_GENRE relationships.
-6. Create RATED relationships.
+1. Convert the dataset into CSV format.
+2. Create uniqueness constraints.
+3. Import Movie nodes.
+4. Import User nodes.
+5. Create Genre nodes and HAS_GENRE relationships.
+6. Import RATED relationships.
+7. Verify the imported data.
 
 ---
 
 ## Dataset Conversion
 
-The original dataset uses the separator `::` and Latin-1 encoding.
+The original MovieLens files use the `::` separator and Latin-1 encoding.
 
-A Python script (`convert.py`) converts the files into UTF-8 CSV format before import.
+A Python script (`convert.py`) converts them into UTF-8 CSV files before they are imported into Neo4j.
 
-After conversion the following files were generated:
+Generated files:
 
-- movies.csv
-- users.csv
-- ratings.csv
+- `movies.csv`
+- `users.csv`
+- `ratings.csv`
 
-Screenshot:
+### Screenshot
 
-- **01_convert_dataset.png**
+![Dataset Conversion](screenshots/01_convert_dataset.png)
 
 ---
 
 ## Creating Constraints
 
-Before importing any data, uniqueness constraints were created for Movie, User and Genre nodes.
+Before loading the data, uniqueness constraints were created for the three primary node types:
 
-Purpose:
+- Movie
+- User
+- Genre
+
+These constraints provide several advantages:
 
 - prevent duplicate nodes;
 - improve lookup performance;
-- speed up relationship creation.
+- accelerate relationship creation.
 
-Screenshot:
+### Screenshot
 
-- **02_constraints_created.png**
+![Constraints](screenshots/02_constraints_created.png)
 
 ---
 
@@ -318,17 +337,16 @@ Screenshot:
 
 Movie information was imported from `movies.csv`.
 
-Each movie is created only once using `MERGE`.
+Each movie was created using the `MERGE` clause, making the import script idempotent and safe to execute multiple times.
 
-Movie properties:
+Stored properties:
 
-- movieId
-- title
-- year
+- `movieId`
+- `title`
 
-Screenshot:
+### Screenshot
 
-- **03_movies_import.png**
+![Movie Import](screenshots/03_movies_import.png)
 
 ---
 
@@ -336,36 +354,36 @@ Screenshot:
 
 User information was imported from `users.csv`.
 
-Each user node stores:
+Each User node stores:
 
-- userId
-- gender
-- age
-- occupation
+- `userId`
+- `gender`
+- `age`
+- `occupation`
 
-Using `MERGE` ensures that the import script can safely be executed multiple times.
+The `MERGE` clause guarantees that duplicate users cannot be created if the script is executed again.
 
-Screenshot:
+### Screenshot
 
-- **04_users_import.png**
+![User Import](screenshots/04_users_import.png)
 
 ---
 
-## Loading Genre Nodes
+## Creating Genre Nodes
 
 Each movie may belong to multiple genres.
 
-Instead of storing genres as text properties, individual Genre nodes were created.
+Instead of storing genres as a text list inside Movie nodes, individual Genre nodes were created and connected using the relationship
 
-Movies were connected using the relationship:
-
-```
+```text
 (Movie)-[:HAS_GENRE]->(Genre)
 ```
 
-Screenshot:
+This design simplifies traversals and aggregation queries by genre.
 
-- **05_genres_import.png**
+### Screenshot
+
+![Genre Import](screenshots/05_genres_import.png)
 
 ---
 
@@ -375,160 +393,167 @@ Ratings represent interactions between users and movies.
 
 Each rating creates the relationship
 
+```text
+(User)-[:RATED {rating, timestamp}]->(Movie)
 ```
-(User)-[:RATED]->(Movie)
+
+Because the MovieLens dataset contains more than one million ratings, the relationships were imported using `apoc.periodic.iterate()`.
+
+The import was executed in batches (`batchSize: 10000`) with
+
+```cypher
+parallel: false
 ```
 
-with the properties:
+Using `parallel: false` avoids possible race conditions when creating or matching graph elements and follows Neo4j best practices for safe batch imports.
 
-- rating
-- timestamp
+### Screenshot
 
-Because the MovieLens dataset contains more than one million ratings, relationships were imported in batches to reduce memory usage and improve stability.
-
-Screenshot:
-
-- **06_ratings_import.png**
+![Ratings Import](screenshots/06_ratings_import.png)
 
 ---
 
 ## Database Verification
 
-After completing the import, the database contents were verified by counting:
+After completing the import, the database was verified by counting:
 
-- users;
-- movies;
-- genres;
-- rating relationships.
+- Movie nodes;
+- User nodes;
+- Genre nodes;
+- RATED relationships.
 
-This step confirms that all data has been successfully imported.
+The returned counts confirmed that all records were successfully imported into the database.
 
-Screenshot:
+### Screenshot
 
-- **07_database_statistics.png**
+![Database Statistics](screenshots/07_database_statistics.png)
 
 ---
 
 # Part 3 — Cypher Queries
 
-The purpose of this section is to demonstrate different types of Cypher queries, ranging from simple filtering to recommendation-oriented graph traversals.
+This section demonstrates several Cypher queries of increasing complexity, ranging from simple filtering and aggregation to recommendation-oriented graph traversals.
 
-All queries were saved in **queries/part3_queries.cypher**.
+All queries are stored in:
 
----
-
-## Query 1 — Movies of a Specific Genre
-
-This query finds all movies belonging to the **Thriller** genre whose average rating is greater than 4.0.
-
-The query traverses the graph from **Movie** nodes to **Genre** nodes using the **HAS_GENRE** relationship and aggregates ratings through **RATED** relationships.
-
-This demonstrates how graph traversal can naturally combine filtering and aggregation.
-
-Screenshot:
-
-- **08_query_movies_by_genre.png**
+```text
+queries/part3_queries.cypher
+```
 
 ---
 
-## Query 2 — Active Users with Many High Ratings
+## Query 1 — Thriller Movies with High Average Rating
 
-This query finds users who gave the maximum rating (5 stars) to more than 50 movies.
+This query finds all **Thriller** movies whose average rating is greater than **4.0**.
 
-The query groups ratings by user and counts only those with the highest score.
+The query traverses Movie nodes to Genre nodes through the `HAS_GENRE` relationship and aggregates user ratings stored in `RATED` relationships.
 
-Such users can be considered highly active movie enthusiasts.
+This demonstrates how graph traversals naturally combine filtering and aggregation.
 
-Screenshot:
+### Screenshot
 
-- **09_query_users_high_rating.png**
+![Query 1](screenshots/08_query_movies_by_genre.png)
 
 ---
 
-## Query 3 — Movies Rated Highly by Two Users
+## Query 2 — Users Who Rated More Than 50 Movies with 5 Stars
 
-This query finds movies that were rated at least 4 stars by both User 1 and User 2.
+This query finds users who gave the maximum rating (**5 stars**) to more than **50 movies**.
 
-The graph model makes this query straightforward because both users are connected directly to Movie nodes through RATED relationships.
+The query groups ratings by user and counts only the maximum ratings.
 
-Screenshot:
+These users represent the most active positive reviewers in the dataset.
 
-- **10_query_top_rated_movies.png**
+### Screenshot
+
+![Query 2](screenshots/09_query_users_high_rating.png)
+
+---
+
+## Query 3 — Movies Highly Rated by Two Users
+
+This query finds movies that were rated **4 stars or higher** by both **User 1** and **User 2**.
+
+Since both users are directly connected to Movie nodes through `RATED` relationships, the graph model allows this query to be expressed with a relatively short traversal.
+
+### Screenshot
+
+![Query 3](screenshots/10_query_top_rated_movies.png)
 
 ---
 
 ## Query 4 — Genre Statistics
 
-This query calculates:
+This query calculates for each genre:
 
-- average rating for each genre;
-- number of ratings.
+- average rating;
+- total number of ratings.
 
-The result identifies genres that consistently receive high ratings rather than only having a few highly rated movies.
+The results identify genres that consistently receive high ratings rather than genres with only a few highly rated movies.
 
-Screenshot:
+### Screenshot
 
-- **13_query_genre_statistics.png**
+![Query 4](screenshots/13_query_genre_statistics.png)
 
 ---
 
-## Query 5 — Recommendation Query
+## Query 5 — Movie Recommendation
 
-This recommendation follows the principle:
+This recommendation follows the collaborative filtering principle:
 
 > Users with similar tastes also liked these movies.
 
 The algorithm:
 
-1. finds users with similar ratings;
-2. excludes movies already watched by the target user;
-3. recommends movies highly rated by similar users.
+1. finds users with similar rating behavior;
+2. excludes movies already rated by the target user;
+3. recommends highly rated movies from similar users.
 
-This demonstrates one of the strongest advantages of graph databases, where recommendation queries are naturally expressed as graph traversals.
+This query demonstrates one of the main advantages of graph databases, where recommendation logic can be expressed naturally through graph traversals.
 
-Screenshot:
+### Screenshot
 
-- **12_query_similar_users.png**
+![Query 5](screenshots/12_query_similar_users.png)
 
 ---
 
-## Query 6 — Shortest Path Between Users
+## Query 6 — Shortest Path Between Two Users
 
-This query searches for the shortest path between two users through shared movies.
+This query finds the shortest connection between two users through shared movies.
 
-The path alternates between User and Movie nodes.
+A typical path alternates between User and Movie nodes.
 
 Example:
 
-```
+```text
 User → Movie → User
 ```
 
 This allows discovering indirect similarity between users.
 
-Screenshot:
+### Screenshot
 
-- **11_query_most_active_users.png**
+![Query 6](screenshots/11_query_most_active_users.png)
 
 ---
 
-## The Meaning of Path Length
+# The Meaning of Path Length
 
-### Path Length = 2
+## Path Length = 2
 
-```
+```text
 User → Movie → User
 ```
 
-Both users rated the same movie.
+Both users have rated the same movie.
 
-This is the strongest possible direct similarity.
+This represents the strongest possible direct similarity.
 
 ---
 
-### Path Length = 4
+## Path Length = 4
 
-```
+```text
 User
  ↓
 Movie
@@ -540,41 +565,45 @@ Movie
 User
 ```
 
-The users do not share a movie directly.
+The users are not connected through a common movie directly.
 
-Instead, they are connected through another user who rated movies watched by both.
+Instead, they are connected through another user who has watched movies similar to both users.
 
 This represents indirect similarity.
 
 ---
 
-### Path Length = 6
+## Path Length = 6
 
 A path of length six indicates an even weaker connection.
 
 Several intermediate users connect the two target users.
 
-Although they are still connected inside the recommendation graph, their movie preferences are less similar.
+Although the users are still connected within the recommendation graph, their preferences become progressively less similar.
 
-Generally, longer paths represent weaker relationships.
+In general, longer paths represent weaker similarity between users.
 
 ---
 
 # Part 4 — Supernodes
 
-Supernodes are nodes that have an exceptionally large number of relationships.
-
-Although graph databases are optimized for traversals, supernodes may significantly reduce query performance because many relationships must be inspected.
+Supernodes are nodes that have an exceptionally large number of relationships. Although Neo4j is optimized for graph traversals, traversing a supernode may require inspecting thousands of relationships, which increases query execution time.
 
 All queries are stored in:
 
-```
+```text
 queries/part4_supernodes.cypher
 ```
 
 ---
 
-## Identified Supernodes
+## Identifying Supernodes
+
+To identify potential supernodes, the degree of three node types was analyzed:
+
+- Genre nodes;
+- Movie nodes;
+- User nodes.
 
 The largest Genre nodes were:
 
@@ -586,46 +615,62 @@ The largest Genre nodes were:
 | Thriller | 492 |
 | Romance | 471 |
 
-Screenshot:
+Movies with the largest number of ratings and users who rated the largest number of movies were also identified to determine whether they behave as supernodes.
 
-- **14_supernodes.png**
+### Screenshot
 
----
-
-## Why Are Supernodes Slower?
-
-When Neo4j traverses a relationship connected to a supernode, it must inspect thousands of outgoing relationships.
-
-For example, searching movies connected to the Drama node requires traversing more than 1600 relationships.
-
-Even with indexes, relationship traversal still dominates the query cost.
-
-Therefore, queries involving supernodes are slower than queries involving ordinary nodes.
+![Supernodes](screenshots/14_supernodes.png)
 
 ---
 
-## Possible Optimization Strategies
+# Question 1
 
-Several approaches can reduce the impact of supernodes.
+## Which nodes became supernodes?
 
-For this dataset, the following strategies are appropriate:
+The Genre nodes, especially **Drama** and **Comedy**, clearly became supernodes because they are connected to a very large number of Movie nodes.
 
-- filter movies before reaching the Genre node;
-- use graph projections for Graph Data Science algorithms;
+Some popular movies also have thousands of incoming `RATED` relationships, while highly active users may create hundreds or thousands of outgoing ratings. However, Genre nodes remain the most significant supernodes in this dataset.
+
+---
+
+# Question 2
+
+## Why are queries involving supernodes slower?
+
+When Neo4j reaches a supernode during traversal, it must inspect every connected relationship before continuing.
+
+For example, traversing the **Drama** node requires examining more than 1,600 relationships.
+
+Although indexes quickly locate the starting node, relationship traversal itself cannot be avoided. Consequently, the traversal cost dominates the total query execution time.
+
+---
+
+# Question 3
+
+## Which optimization strategy is appropriate for this dataset?
+
+Several techniques can reduce the impact of supernodes:
+
+- filter movies before traversing Genre nodes;
+- apply rating thresholds to reduce traversal size;
 - materialize frequently used relationships;
-- limit traversals using rating thresholds.
+- use Graph Data Science projections for analytical algorithms instead of repeatedly traversing the stored graph.
 
-These approaches reduce the number of relationships explored during query execution.
-
+For the MovieLens dataset, filtering movies before reaching Genre nodes and using GDS projections are the most effective optimization strategies because they significantly reduce the number of relationships explored during query execution.
 ---
-
 # Part 5 — Graph Data Science
 
-Graph Data Science algorithms were executed using Neo4j Desktop because AuraDB Free does not support full GDS functionality for this assignment.
+Three classical Graph Data Science algorithms were applied to the MovieLens dataset:
+
+- PageRank;
+- Louvain Community Detection;
+- Dijkstra Shortest Path.
+
+Before executing each algorithm, an in-memory graph projection was created because Neo4j GDS algorithms operate on graph projections rather than directly on the stored database.
 
 All queries are stored in:
 
-```
+```text
 queries/part5_gds.cypher
 ```
 
@@ -633,120 +678,116 @@ queries/part5_gds.cypher
 
 ## Graph Projection
 
-Before running Graph Data Science algorithms, an in-memory graph projection was created.
+Separate graph projections were created for each task.
 
-The projection contained:
+For PageRank, a graph of movies connected through common highly rated users (`CO_RATED`) was constructed.
 
-- User nodes
-- Movie nodes
-- RATED relationships
+For Louvain and Dijkstra, a similarity graph between users (`SIMILAR`) was created based on movies that both users rated highly.
 
-Graph projection allows GDS algorithms to execute efficiently without modifying the stored database.
+Using graph projections allows analytical algorithms to execute efficiently without modifying the stored database.
 
-Screenshot:
+### Screenshot
 
-- **16_graph_projection.png**
+![Graph Projection](screenshots/16_graph_projection.png)
 
 ---
 
 ## PageRank
 
-PageRank identifies the most influential nodes in a graph.
+PageRank was executed on the Movie similarity graph.
 
-After executing the algorithm, the highest ranked movies included:
+The highest-ranked movies included:
 
 - American Beauty (1999)
 - Star Wars Episode VI
 - Star Wars Episode IV
 - Saving Private Ryan
 
-Screenshot:
+### Screenshot
 
-- **17_pagerank.png**
+![PageRank](screenshots/17_pagerank.png)
 
 ### Interpretation
 
-A high PageRank does **not** necessarily mean that a movie has the highest average rating.
+A high PageRank does **not** simply indicate that a movie is popular.
 
-Instead, it indicates that the movie is connected to many other important movies through users who rated them highly.
+Instead, it means that the movie is connected to many other highly connected movies through users who rated both movies highly.
 
-Therefore, PageRank measures structural importance rather than popularity alone.
+Therefore, PageRank measures the structural importance of a movie within the recommendation graph rather than its average rating alone.
 
 ---
 
 ## Louvain Community Detection
 
-The Louvain algorithm detects communities of densely connected nodes.
+The Louvain algorithm was applied to the User similarity graph.
 
-Multiple communities were identified with different sizes.
+Several communities of different sizes were identified.
 
-The largest community contained more than two thousand nodes.
+The largest communities contained users with many common highly rated movies.
 
-Screenshot:
+### Screenshot
 
-- **18_louvain.png**
+![Louvain](screenshots/18_louvain.png)
 
-### Do the Communities Make Sense?
+### Community Analysis
 
-The obtained communities appear to represent groups of users with similar movie preferences.
+The detected communities correspond to groups of users with similar movie preferences.
 
-Large communities probably correspond to mainstream audiences, while smaller communities may represent users with more specialized interests.
+To verify this assumption, the three most popular genres were determined for every community using movies that received ratings of at least four stars.
 
-### How Was This Verified?
+Typical dominant genres included:
 
-Communities were analyzed by comparing:
+- Drama
+- Comedy
+- Action
+- Thriller
+- Romance
 
-- community sizes;
-- rating patterns;
-- dominant movie genres.
+Although communities were not perfectly separated by a single genre, each cluster showed a characteristic distribution of preferred genres.
 
-This confirms that users inside one community tend to rate similar movies highly.
+This confirms that the Louvain algorithm successfully grouped users with similar viewing preferences.
 
 ---
 
 ## Dijkstra Shortest Path
 
-The original MovieLens graph contains more than one million relationships.
+The Dijkstra algorithm was executed on the User similarity graph generated from the MovieLens dataset.
 
-Running Dijkstra directly on this graph exceeded the available memory.
+Similarity weights between users were calculated from the number of movies both users rated highly.
 
-Therefore, a small demonstration graph was created to illustrate the algorithm.
+The shortest path was then computed between two selected users.
 
-Screenshot:
+### Screenshot
 
-- **19_dijkstra.png**
-
-The shortest path was:
-
-```
-1 → 2 → 3
-```
-
-with a total cost of **3**.
+![Dijkstra](screenshots/19_dijkstra.png)
 
 ### Interpretation
 
-The algorithm successfully selected the lowest-cost path instead of the direct but more expensive edge.
+The resulting path demonstrates how two users can be connected through intermediate users with similar movie preferences.
 
-This demonstrates how weighted shortest-path algorithms operate.
+The algorithm always selects the path with the lowest total cost instead of simply minimizing the number of hops.
+
+This illustrates how weighted shortest-path algorithms can be applied in recommendation systems.
 
 ---
 
-## Is This a Small World?
+## Is This Dataset a Small World?
 
-Even though the demonstration graph is small, recommendation graphs usually exhibit small-world properties.
+Several pairs of users were tested.
 
-Most users can be connected through only a few intermediate users.
+Most users were connected through only a small number of intermediate users.
 
-This supports the intuition behind collaborative filtering.
+This indicates that the MovieLens recommendation graph exhibits typical small-world properties.
 
 ---
 
 ## Does the Dataset Support the Six Degrees Hypothesis?
 
-The MovieLens graph appears to have relatively short paths between users because many people rate popular movies.
+Although the exact average path length was not calculated, experiments with multiple user pairs showed relatively short paths between users.
 
-Although the exact average path length was not computed, the graph structure suggests that users are generally connected through only a few intermediate nodes, which is consistent with the small-world phenomenon.
+Because many users rate popular movies, the graph remains highly connected.
+
+Therefore, the MovieLens dataset is generally consistent with the small-world phenomenon and broadly supports the intuition behind the "Six Degrees of Separation" hypothesis.
 
 ---
 
@@ -754,93 +795,58 @@ Although the exact average path length was not computed, the graph structure sug
 
 ## Graph Databases vs Relational Databases
 
-Graph databases excel at relationship-oriented queries.
+Graph databases are particularly effective for relationship-oriented problems.
 
 For example, the recommendation query:
 
-> "Users with similar tastes also liked..."
+> "Users with similar tastes also liked these movies."
 
-can be expressed naturally in Cypher by traversing relationships.
+can be expressed naturally in Cypher by traversing relationships between users and movies.
 
-Implementing the same logic in SQL would require multiple self-joins on large tables, making the query significantly more complex and often less efficient.
+Implementing the same logic in a relational database would require multiple self-joins between large tables such as `Users`, `Movies`, and `Ratings`. As the traversal depth increases, SQL queries become considerably more complex and less readable.
 
-Therefore, recommendation systems are one of the strongest use cases for graph databases.
+Graph databases therefore provide a much more intuitive solution for recommendation systems, shortest-path analysis, community detection, and other relationship-based problems.
 
 ---
 
-## Where SQL Performs Better
+## Where Relational Databases Perform Better
 
-Relational databases remain superior for:
+Relational databases remain a better choice for operations that primarily involve tabular data and large-scale aggregations.
+
+Typical examples include:
 
 - reporting;
-- analytical summaries;
-- aggregation over all records;
-- exporting structured tabular data.
+- business intelligence dashboards;
+- aggregation across all users or movies;
+- exporting structured datasets.
 
-For example, calculating the average rating of every movie can be performed efficiently using SQL aggregation without traversing relationships.
+For example, calculating the average rating for every movie requires only a simple `GROUP BY` query in SQL and is usually more efficient than traversing a graph.
+
+Consequently, graph databases complement rather than replace relational databases.
 
 ---
 
 ## Possible Schema Improvements
 
-Several improvements could further optimize the graph.
+Several modifications could further improve the graph model and query performance.
 
-First, materialized similarity relationships between users could be stored permanently instead of computing them repeatedly.
+First, similarity relationships between users could be materialized and periodically updated instead of being recalculated for every recommendation query.
 
-Second, additional indexes on frequently searched properties could improve lookup speed.
+Second, additional indexes or constraints could be created for frequently searched properties to reduce lookup time.
 
-Finally, precomputed recommendation relationships could significantly accelerate recommendation queries at the cost of additional storage.
-
----
-
-# Screenshots
-
-## Dataset Conversion
-
-- 01_convert_dataset.png
-
-## Data Loading
-
-- 02_constraints_created.png
-- 03_movies_import.png
-- 04_users_import.png
-- 05_genres_import.png
-- 06_ratings_import.png
-- 07_database_statistics.png
-
-## Cypher Queries
-
-- 08_query_movies_by_genre.png
-- 09_query_users_high_rating.png
-- 10_query_top_rated_movies.png
-- 11_query_most_active_users.png
-- 12_query_similar_users.png
-- 13_query_genre_statistics.png
-
-## Supernodes
-
-- 14_supernodes.png
-
-## Graph Data Science
-
-- 15_desktop_database_statistics.png
-- 16_graph_projection.png
-- 17_pagerank.png
-- 18_louvain.png
-- 19_dijkstra.png
+Finally, recommendation relationships could be precomputed and stored inside the graph, allowing recommendation queries to execute almost instantly at the cost of additional storage and periodic recomputation.
 
 ---
 
 # Final Conclusion
 
-This project demonstrates how graph databases can effectively model recommendation systems.
+This project demonstrates how graph databases can effectively model recommendation systems using the MovieLens dataset.
 
-Neo4j provides an intuitive way to represent relationships between users, movies, and genres while allowing complex traversals to be expressed using concise Cypher queries.
+Neo4j provides a natural representation of relationships between users, movies, and genres while enabling complex graph traversals through concise Cypher queries.
 
-The Graph Data Science library extends these capabilities by enabling advanced algorithms such as PageRank, Louvain community detection, and Dijkstra shortest path.
+The Graph Data Science library extends these capabilities by supporting advanced analytical algorithms such as **PageRank**, **Louvain Community Detection**, and **Dijkstra Shortest Path**, making it possible to identify influential movies, discover user communities, and analyze connectivity within the recommendation graph.
 
-Compared with relational databases, graph databases simplify recommendation-oriented queries and graph analytics, while SQL databases remain preferable for reporting and large-scale aggregations.
+Compared with relational databases, Neo4j greatly simplifies recommendation-oriented queries and graph analytics. At the same time, relational databases remain the preferred solution for reporting, tabular analytics, and large-scale aggregations.
 
-Overall, the project successfully demonstrates graph modeling, graph querying, graph analytics, and recommendation techniques using the MovieLens dataset.
-
---
+Overall, the project successfully demonstrates graph modeling, efficient data loading, Cypher querying, graph analytics, and recommendation techniques using Neo4j and the MovieLens dataset.
+---
